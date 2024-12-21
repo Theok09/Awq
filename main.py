@@ -109,3 +109,55 @@ async def confirm_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Withdrawal Handling ---
 async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.
+    callback_query.from_user.id
+    investments = load_investments()
+    
+    if user_id not in investments:
+        await update.callback_query.message.reply_text("❗ No active investments found.")
+        return
+    
+    investment = investments[user_id]
+    if datetime.now() >= datetime.strptime(investment['return_date'], '%Y-%m-%d'):
+        del investments[user_id]
+        save_investments(investments)
+        await update.callback_query.message.reply_text(
+            f"✅ Withdrawal Successful!\n\n"
+            f"💵 Amount: {investment['profit']} {investment['currency'].upper()}"
+        )
+    else:
+        await update.callback_query.message.reply_text("❗ Withdrawal is not yet available. Please wait until the return date.")
+
+# --- Admin Dashboard ---
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ You do not have access to the admin panel!")
+        return
+    
+    investments = load_investments()
+    report = "📊 **Investment Report:**\n\n"
+    for uid, data in investments.items():
+        report += f"👤 User ID: {uid}\n"
+        report += f"💵 Amount: {data['amount']} {data['currency'].upper()}\n"
+        report += f"📅 Return Date: {data['return_date']}\n"
+        report += f"💰 Total Return: {data['profit']} {data['currency'].upper()}\n"
+        report += f"🔗 TxID: {data['txid']}\n\n"
+    
+    await update.message.reply_text(report if investments else "📭 No investments found.")
+
+# --- Main Function ---
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CallbackQueryHandler(deposit, pattern='^deposit_'))
+    app.add_handler(CallbackQueryHandler(withdraw, pattern='^withdraw'))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_deposit))
+    
+    logger.info("🚀 Bot is running...")
+    app.run_polling()
+
+if name == '__main__':
+    main()

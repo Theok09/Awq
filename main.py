@@ -5,238 +5,193 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
                           CallbackContext, ConversationHandler)
 
-# ================= تنظیمات ربات و API ها =====================
+# ================= تنظیمات پیشرفته =====================
 TOKEN = "7354915525:AAEjyAR25B-Cw9KVxqQ0z-U9jartMz2HTFg"
-CRYPTO_API_URL = "https://one-api.ir/DigitalCurrency/?token=319633:679f69675fd2a"
-GOLD_API_URL = "https://brsapi.ir/FreeTsetmcBourseApi/Api_Free_Gold_Currency_v2.json"
-ETHERSCAN_API_KEY = "YOUR_ETHERSCAN_API_KEY"  # برای شبکه اتریوم
+CRYPTO_API_URL = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc"
+GOLD_API_URL = "https://api.tgju.org/v1/data/sana/parameters"
+BLOCKCHAIN_APIS = {
+    'ETH': {'url': 'https://api.etherscan.io/api', 'key': 'YOUR_ETHERSCAN_KEY'},
+    'BTC': {'url': 'https://blockchain.info/rawaddr/'},
+    'SOL': {'url': 'https://public-api.solscan.io/account/'}
+}
 
-# ================= حالت‌های گفتگو =====================
-# قیمت محصولات (pricer)
-SELECTING_BRAND = 1
-SELECTING_CATEGORY = 2
-# اطلاعات ولت
-WALLET_PLATFORM, WALLET_ADDRESS = range(2)
-
-# ------------------ دستورات /start و /pricer ------------------
-def start(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    update.message.reply_text(
-        f"Hello {user.first_name}! Welcome.\n\n"
-        "دستورات موجود:\n"
-        "• /pricer   => مشاهده قیمت محصولات\n"
-        "• /wallet   => دریافت اطلاعات ولت (ETH, BTC, TRX, SOL)\n"
-        "• /checktx  => بررسی لینک تراکنش\n"
-        "همچنین برای دریافت اطلاعات ارز دیجیتال فقط نام یا نماد ارز (با تعداد اختیاری) را ارسال کنید.\n"
-        "مثال: ۲ بیت کوین یا BTC"
-    )
-
-def pricer(update: Update, context: CallbackContext) -> int:
-    keyboard = [
-        ['Apple', 'Samsung', 'Xiaomi', 'Huawei', 'Sony'],
-        ['Lenovo', 'Razer', 'Oppo', 'OnePlus', 'Motorola'],
-        ['Google', 'LG', 'Asus', 'Vivo', 'ZTE']
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-    update.message.reply_text("Please select a brand:", reply_markup=reply_markup)
-    return SELECTING_BRAND
-
-def get_price(brand: str, category: str) -> str:
-    # در اینجا می‌توانید از API یا منابع مناسب جهت دریافت قیمت واقعی استفاده کنید
-    return f"The price of the {category} from {brand} today is: $500 (temporary price)"
-
-def handle_brand_selection(update: Update, context: CallbackContext) -> int:
-    selected_brand = update.message.text
-    context.user_data['brand'] = selected_brand
-    keyboard = [
-        ['Phone', 'Laptop', 'Earbuds', 'Smartwatch'],
-        ['Tablet', 'Gaming Devices', 'Other Products']
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-    update.message.reply_text(
-        f"You selected the brand {selected_brand}.\nPlease choose a product category:",
-        reply_markup=reply_markup
-    )
-    return SELECTING_CATEGORY
-
-def handle_category_selection(update: Update, context: CallbackContext) -> int:
-    selected_category = update.message.text
-    selected_brand = context.user_data.get('brand', 'Unknown')
-    price_info = get_price(selected_brand, selected_category)
-    update.message.reply_text(
-        f"Price information for the {selected_category} from {selected_brand}:\n{price_info}"
-    )
-    gold_info = get_gold_and_currency_prices()
-    update.message.reply_text(gold_info)
-    return ConversationHandler.END
-
-def get_gold_and_currency_prices() -> str:
-    try:
-        response = requests.get(GOLD_API_URL, timeout=10)
-        data = response.json()
-        if 'status' in data and data['status'] == 'OK':
-            name = data.get('name', 'Data not available')
-            price = data.get('price', 'Data not available')
-            change_percent = data.get('change_percent', 'Data not available')
-            unit = data.get('unit', 'Data not available')
-            date = data.get('date', 'Data not available')
-            time_val = data.get('time', 'Data not available')
-            return (f"Gold Price Update:\nDate: {date}  Time: {time_val}\n"
-                    f"{name}: {price} {unit}\nChange: {change_percent}%")
-        else:
-            return "Sorry, couldn't fetch gold prices at the moment."
-    except Exception as e:
-        return f"Error occurred while fetching gold prices: {str(e)}"
-
-# ------------------ اطلاعات ارز دیجیتال ------------------
-def extract_amount_and_query(text: str):
-    """
-    در صورتی که عددی در ابتدای متن وجود داشته باشد،
-    آن را به عنوان مقدار استخراج کرده و باقی متن جهت جستجوی ارز در نظر می‌گیرد.
-    """
-    text = text.strip()
-    match = re.match(r'^([\d۰-۹.,]+)', text)
-    amount = 1.0
-    persian_digits = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
-    if match:
-        num_str = match.group(1).translate(persian_digits)
-        try:
-            num_str = num_str.replace(",", ".")
-            amount = float(num_str)
-        except ValueError:
-            amount = 1.0
-        query = text[match.end():].strip()
-    else:
-        query = text
-    return amount, query
-
-def search_crypto(crypto_query: str, crypto_list: list) -> dict:
-    """
-    بررسی می‌کند آیا ارز دیجیتال مورد نظر در لیست دریافتی از API وجود دارد یا خیر.
-    مقایسه روی سه فیلد: key، name و name_en انجام می‌شود.
-    """
-    query_lower = crypto_query.lower()
-    for coin in crypto_list:
-        key = coin.get("key", "").upper()
-        name_fa = coin.get("name", "").strip().lower()
-        name_en = coin.get("name_en", "").strip().lower()
-        if query_lower == key.lower() or query_lower == name_fa or query_lower == name_en:
-            return coin
+# ================= سیستم پردازش زبان طبیعی =====================
+def natural_language_processor(text: str):
+    text = text.lower().strip()
+    
+    # تشخیص ارزهای دیجیتال
+    crypto_patterns = {
+        r'(\d+[\.,]?\d*)\s*(بیت[ _]?کوین|btc|bitcoin)': 'bitcoin',
+        r'(\d+[\.,]?\d*)\s*(اتریوم|eth|ether)': 'ethereum',
+        r'(\d+[\.,]?\d*)\s*(سولانا|sol|solana)': 'solana',
+        r'(\d+[\.,]?\d*)\s*(تتر|usdt|tether)': 'tether',
+    }
+    
+    # تشخیص طلا و سکه
+    gold_patterns = {
+        r'(طلای|طلا)\s*(\d+[\.,]?\d*)?': 'geram18',
+        r'(سکه|آزادی|بهرام)\s*(\d+[\.,]?\d*)?': 'sekeb',
+        r'(مثقال|مثقالی)\s*(\d+[\.,]?\d*)?': 'mesghal'
+    }
+    
+    # بررسی الگوهای ارز دیجیتال
+    for pattern, coin_id in crypto_patterns.items():
+        match = re.match(pattern, text)
+        if match:
+            amount = float(match.group(1).replace(',', '.')) if match.group(1) else 1.0
+            return {'type': 'crypto', 'id': coin_id, 'amount': amount}
+    
+    # بررسی الگوهای طلا و سکه
+    for pattern, item_key in gold_patterns.items():
+        match = re.match(pattern, text)
+        if match:
+            amount = float(match.group(2).replace(',', '.')) if match.group(2) else 1.0
+            return {'type': 'gold', 'key': item_key, 'amount': amount}
+    
     return None
 
-def format_crypto_info(coin: dict, amount: float) -> str:
-    price = coin.get("price", 0)
-    total = price * amount
-    return (
-        f"💰 *{coin.get('name','N/A')} ({coin.get('name_en','N/A')})*\n\n"
-        f"مقدار درخواستی: {amount}\n"
-        f"قیمت واحد: ${price:,.2f}\n"
-        f"جمع قیمت: ${total:,.2f}\n\n"
-        f"تغییر 24 ساعته: {coin.get('percent_change_24h','N/A')}%\n"
-        f"بالاترین قیمت 24 ساعته: ${coin.get('daily_high_price',0):,.2f}\n"
-        f"پایین‌ترین قیمت 24 ساعته: ${coin.get('daily_low_price',0):,.2f}\n\n"
-        f"حجم معاملات 24 ساعتی: ${coin.get('volume_24h',0):,.2f}\n"
-        f"ارزش بازار (Market Cap): ${coin.get('market_cap',0):,.2f}\n\n"
-        f"تغییرات زمانی:\n"
-        f"1 ساعت: {coin.get('percent_change_1h','N/A')}% | 7 روز: {coin.get('percent_change_7d','N/A')}%\n"
-        f"30 روز: {coin.get('percent_change_30d','N/A')}%\n\n"
-        f"All Time High: ${coin.get('ath',0):,.2f}\n"
-        f"All Time Low: ${coin.get('atl',0):,.2f}\n"
-        f"رتبه: {coin.get('rank','N/A')} - تسلط بازار: {coin.get('dominance','N/A')}%"
-    )
+# ================= سیستم قیمت‌گذاری پیشرفته =====================
+class AdvancedPriceChecker:
+    @staticmethod
+    def get_crypto_price(coin_id: str, amount: float=1):
+        try:
+            params = {'ids': coin_id, 'vs_currency': 'usd'}
+            response = requests.get(CRYPTO_API_URL, params=params)
+            data = response.json()
+            
+            if data and isinstance(data, list):
+                coin = data[0]
+                return {
+                    'name': coin['name'],
+                    'symbol': coin['symbol'],
+                    'price': coin['current_price'],
+                    'change_24h': coin['price_change_percentage_24h'],
+                    'high_24h': coin['high_24h'],
+                    'low_24h': coin['low_24h'],
+                    'amount': amount,
+                    'total': amount * coin['current_price']
+                }
+        except Exception as e:
+            print(f"Error fetching crypto price: {e}")
+            return None
 
-def handle_crypto_message(update: Update, context: CallbackContext):
+    @staticmethod
+    def get_gold_price(item_key: str, amount: float=1):
+        try:
+            response = requests.get(GOLD_API_URL)
+            data = response.json()
+            
+            for item in data.values():
+                if item.get('key') == item_key:
+                    price = float(item['price'].replace(',', ''))
+                    return {
+                        'title': item['title'],
+                        'price': price,
+                        'change': item['change'],
+                        'amount': amount,
+                        'total': amount * price
+                    }
+            return None
+        except Exception as e:
+            print(f"Error fetching gold price: {e}")
+            return None
+
+# ================= دسترسی به اطلاعات بلاکچین =====================
+class BlockchainAnalyzer:
+    @staticmethod
+    def get_wallet_info(platform: str, address: str):
+        try:
+            if platform == 'ETH':
+                url = f"{BLOCKCHAIN_APIS['ETH']['url']}?module=account&action=balance&address={address}&tag=latest&apikey={BLOCKCHAIN_APIS['ETH']['key']}"
+                response = requests.get(url)
+                balance = int(response.json()['result']) / 10**18
+                return f"موجودی اتریوم: {balance:.4f} ETH"
+            
+            elif platform == 'BTC':
+                url = f"{BLOCKCHAIN_APIS['BTC']['url']}{address}"
+                response = requests.get(url)
+                data = response.json()
+                balance = data['final_balance'] / 10**8
+                return f"موجودی بیت‌کوین: {balance:.8f} BTC"
+            
+            elif platform == 'SOL':
+                url = f"{BLOCKCHAIN_APIS['SOL']['url']}{address}"
+                response = requests.get(url)
+                data = response.json()
+                balance = data['tokenInfo']['tokenAmount']['amount'] / 10**9
+                return f"موجودی سولانا: {balance:.2f} SOL"
+            
+        except Exception as e:
+            return f"خطا در دریافت اطلاعات: {str(e)}"
+
+# ================= کنترلرهای ربات =====================
+def handle_message(update: Update, context: CallbackContext):
     text = update.message.text
-    if not text:
+    user = update.message.from_user
+    
+    # پردازش زبان طبیعی
+    nlp_result = natural_language_processor(text)
+    
+    if not nlp_result:
+        update.message.reply_text("⚠️ لطفاً درخواست خود را به شکل صحیح وارد کنید. مثال:\n• 2 سولانا\n• طلا\n• 1.5 بیت‌کوین")
         return
-    # اگر پیام شامل دستور باشد، ادامه ندهد
-    if text.startswith("/"):
+    
+    if nlp_result['type'] == 'crypto':
+        result = AdvancedPriceChecker.get_crypto_price(nlp_result['id'], nlp_result['amount'])
+        if result:
+            message = (
+                f"💰 {result['name']} ({result['symbol'].upper()})\n\n"
+                f"مقدار: {nlp_result['amount']}\n"
+                f"قیمت واحد: ${result['price']:,.2f}\n"
+                f"جمع کل: ${result['total']:,.2f}\n\n"
+                f"تغییرات 24h: {result['change_24h']:.2f}%\n"
+                f"بالاترین قیمت: ${result['high_24h']:,.2f}\n"
+                f"پایین‌ترین قیمت: ${result['low_24h']:,.2f}"
+            )
+        else:
+            message = "⚠️ اطلاعات ارز مورد نظر یافت نشد"
+    
+    elif nlp_result['type'] == 'gold':
+        result = AdvancedPriceChecker.get_gold_price(nlp_result['key'], nlp_result['amount'])
+        if result:
+            message = (
+                f"🏅 {result['title']}\n\n"
+                f"مقدار: {nlp_result['amount']}\n"
+                f"قیمت واحد: {result['price']:,.0f} تومان\n"
+                f"جمع کل: {result['total']:,.0f} تومان\n\n"
+                f"تغییرات: {result['change']}%"
+            )
+        else:
+            message = "⚠️ اطلاعات طلای مورد نظر یافت نشد"
+    
+    update.message.reply_text(message)
+
+def wallet_handler(update: Update, context: CallbackContext):
+    args = context.args
+    if len(args) != 2:
+        update.message.reply_text("⚠️ فرمت صحیح:\n/wallet [پلتفرم] [آدرس]")
         return
-    amount, query = extract_amount_and_query(text)
-    if not query:
-        update.message.reply_text("لطفاً نام یا نماد ارز دیجیتال را وارد کنید.")
+    
+    platform, address = args
+    platform = platform.upper()
+    
+    if platform not in BLOCKCHAIN_APIS:
+        update.message.reply_text("⚠️ پلتفرم‌های پشتیبانی شده: ETH, BTC, SOL")
         return
-    try:
-        response = requests.get(CRYPTO_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        # API ممکن است یک دیکشنری یا لیست برگرداند
-        if isinstance(data, dict):
-            crypto_list = [data]
-        elif isinstance(data, list):
-            crypto_list = data
-        else:
-            update.message.reply_text("❌ فرمت داده دریافتی از API ناشناخته است.")
-            return
-        coin = search_crypto(query, crypto_list)
-        if coin:
-            info = format_crypto_info(coin, amount)
-            update.message.reply_text(info, parse_mode="Markdown")
-        else:
-            update.message.reply_text("❌ ارز دیجیتالی مطابق با درخواست شما پیدا نشد. لطفاً نام یا نماد را بررسی کنید.")
-    except Exception as e:
-        update.message.reply_text(f"⚠️ خطا در دریافت اطلاعات از API: {str(e)}")
+    
+    result = BlockchainAnalyzer.get_wallet_info(platform, address)
+    update.message.reply_text(result)
 
-# ------------------ بخش اطلاعات ولت (ETH, BTC, TRX, SOL) ------------------
-def wallet_start(update: Update, context: CallbackContext) -> int:
-    keyboard = [["ETH", "BTC", "TRX", "SOL"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-    update.message.reply_text("لطفاً پلتفرم مورد نظر را انتخاب کنید (ETH, BTC, TRX, SOL):", reply_markup=reply_markup)
-    return WALLET_PLATFORM
+# ================= راه‌اندازی ربات =====================
+def main():
+    updater = Updater(TOKEN)
+    dp = updater.dispatcher
+    
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dp.add_handler(CommandHandler("wallet", wallet_handler))
+    
+    updater.start_polling()
+    updater.idle()
 
-def wallet_platform(update: Update, context: CallbackContext) -> int:
-    platform = update.message.text.strip().upper()
-    if platform not in ["ETH", "BTC", "TRX", "SOL"]:
-        update.message.reply_text("لطفاً یکی از گزینه‌های ETH, BTC, TRX یا SOL را انتخاب کنید.")
-        return WALLET_PLATFORM
-    context.user_data['wallet_platform'] = platform
-    update.message.reply_text("لطفاً آدرس ولت را وارد کنید:")
-    return WALLET_ADDRESS
-
-def wallet_address(update: Update, context: CallbackContext) -> int:
-    platform = context.user_data.get('wallet_platform')
-    address = update.message.text.strip()
-    if platform == "ETH":
-        info = get_eth_wallet_info(address)
-    elif platform == "BTC":
-        info = get_btc_wallet_info(address)
-    elif platform == "TRX":
-        info = get_tron_wallet_info(address)
-    elif platform == "SOL":
-        info = get_sol_wallet_info(address)
-    else:
-        info = "پلتفرم نامعتبر است."
-    update.message.reply_text(info, parse_mode="Markdown")
-    return ConversationHandler.END
-
-def get_eth_wallet_info(address: str) -> str:
-    try:
-        balance_url = f"https://api.etherscan.io/api?module=account&action=balance&address={address}&tag=latest&apikey={ETHERSCAN_API_KEY}"
-        res_balance = requests.get(balance_url, timeout=10).json()
-        if res_balance.get("status") != "1":
-            return "خطا در دریافت موجودی یا آدرس نامعتبر است."
-        balance_eth = int(res_balance["result"]) / 10**18
-
-        tx_url = f"https://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock=0&endblock=99999999&page=1&offset=5&sort=desc&apikey={ETHERSCAN_API_KEY}"
-        res_tx = requests.get(tx_url, timeout=10).json()
-        txs = ""
-        if res_tx.get("status") == "1":
-            for tx in res_tx["result"]:
-                time_str = datetime.fromtimestamp(int(tx["timeStamp"])).strftime('%Y-%m-%d %H:%M:%S')
-                txs += f"\n  • {time_str}: {tx['value']} Wei از `{tx['from']}` به `{tx['to']}`"
-        else:
-            txs = "تراکنشی یافت نشد."
-        return (f"*اطلاعات ولت ETH:*\n"
-                f"آدرس: `{address}`\n"
-                f"موجودی: {balance_eth:.4f} ETH\n"
-                f"آخرین تراکنش‌ها:{txs}")
-    except Exception as e:
-        return f"خطا در دریافت اطلاعات ولت ETH: {str(e)}"
-
-def get_btc_wallet_info(address: str) -> str:
-    try:
-        url = f"https://api.blockcypher.com/v1/btc/main/addrs/{address}"
-        res = requests.get(url, timeout=10).json()
-        if "error" in res:
-            return "آدرس نامعتبر یا مشکلی در دریافت اطلاعات BTC وجود دارد."
-        balance_btc = res.get("balance", 0) /
+if __name__ == '__main__':
+    main()

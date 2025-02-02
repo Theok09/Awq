@@ -6,7 +6,7 @@ from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
                           CallbackContext, ConversationHandler)
 
 # ================= تنظیمات پیشرفته =====================
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "7354915525:AAEjyAR25B-Cw9KVxqQ0z-U9jartMz2HTFg"
 CRYPTO_API_URL = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc"
 GOLD_API_URL = "https://api.tgju.org/v1/data/sana/parameters"
 BLOCKCHAIN_APIS = {
